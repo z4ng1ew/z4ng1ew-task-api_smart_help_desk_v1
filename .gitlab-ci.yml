@@ -1,0 +1,66 @@
+stages:
+  - test
+  - build
+
+variables:
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  KUBE_NAMESPACE: smart-helpdesk
+  # Для MongoDB в тестах
+  MONGO_URL: mongodb://mongo:27017/helpdesk
+
+# Кэшируем зависимости
+cache:
+  paths:
+    - .pytest_cache/
+
+# ============ ЭТАП ТЕСТОВ ============
+test:
+  image: python:3.12-slim
+  services:
+    - name: mongo:7
+      alias: mongo
+  stage: test
+  before_script:
+    - pip install -r requirements.txt
+    - pip install pytest-asyncio httpx
+  script:
+    - python -m pytest tests/ -v --cov=. --cov-report=xml
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+# ============ ЭТАП СБОРКИ ============
+build:
+  image: docker:26.1.3
+  services:
+    - docker:26.1.3-dind
+  stage: build
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - echo "Сборка образа..."
+    - docker build -t $DOCKER_IMAGE .
+    - echo "Пуш образа..."
+    - docker push $DOCKER_IMAGE
+  only:
+    - main
+
+
+    
+# deploy:
+#   stage: deploy
+#   script:
+#     - echo "Настройка kubectl..."
+#     - mkdir -p /root/.kube
+#     - echo "$KUBE_CONFIG" | base64 -d > /root/.kube/config
+#     - chmod 600 /root/.kube/config
+#     - echo "Деплой в k3s..."
+#     - kubectl config set-context --current --namespace=$KUBE_NAMESPACE
+#     - kubectl apply -f k8s/deployment.yaml
+#     - kubectl rollout status deployment/task-service --timeout=60s
+#   only:
+#     - main
+#   environment:
+#     name: production
